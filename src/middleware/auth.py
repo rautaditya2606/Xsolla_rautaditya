@@ -1,7 +1,6 @@
-from fastapi import Request, HTTPException, Security, Depends
+from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.config import config
-from src.models.schemas import ErrorEnvelope, ErrorDetail
 
 security_bearer = HTTPBearer(auto_error=False)
 

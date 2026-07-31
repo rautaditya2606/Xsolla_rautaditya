@@ -45,7 +45,7 @@ async def test_payload_caching():
 
         res1 = await client.post("/v1/reviews", json=body, headers=AUTH_HEADERS)
         assert res1.status_code == 202
-        job_id1 = res1.json()["jobId"]
+        _ = res1.json()["jobId"]
 
         # Wait for queue worker to finish processing job 1
         await asyncio.sleep(0.3)
