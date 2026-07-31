@@ -13,22 +13,31 @@ import asyncio
 import httpx
 
 async def self_pinger():
-    await asyncio.sleep(10)
-    url = f"http://127.0.0.1:{config.PORT}/health"
-    async with httpx.AsyncClient() as client:
-        while True:
-            try:
-                await client.get(url)
-            except Exception:
-                pass
-            await asyncio.sleep(240)
+    try:
+        await asyncio.sleep(10)
+        url = f"http://127.0.0.1:{config.PORT}/health"
+        async with httpx.AsyncClient() as client:
+            while True:
+                try:
+                    await client.get(url)
+                except Exception:
+                    pass
+                await asyncio.sleep(240)
+    except asyncio.CancelledError:
+        pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     queue_manager.start_workers(config.MAX_CONCURRENT_JOBS)
     ping_task = asyncio.create_task(self_pinger())
-    yield
-    ping_task.cancel()
+    try:
+        yield
+    finally:
+        ping_task.cancel()
+        try:
+            await ping_task
+        except asyncio.CancelledError:
+            pass
 
 app = FastAPI(
     title="AI Diff Review Service",
