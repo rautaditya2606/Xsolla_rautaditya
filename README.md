@@ -12,6 +12,7 @@ An asynchronous REST API built with FastAPI and Python 3.11 for automated unifie
   - `llm`: Optional provider using OpenAI or Anthropic (handles missing keys gracefully by marking job status as `failed` instead of throwing HTTP 500).
 - **Server-Sent Events (SSE)**: Real-time progress updates on `/v1/reviews/{id}/stream` with replay support for reconnected clients.
 - **Rate Limiting**: Custom sliding window rate limiter (30 requests/minute per client) returning standard 429 status and `Retry-After` headers.
+- **Automated CI/CD**: GitHub Actions pipeline checking code quality (`ruff`) and running test suites (`pytest`) on every push.
 
 ---
 
@@ -19,6 +20,9 @@ An asynchronous REST API built with FastAPI and Python 3.11 for automated unifie
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── ci.yml            # GitHub Actions CI pipeline
 ├── src/
 │   ├── main.py               # Application entrypoint & error handlers
 │   ├── config.py             # Environment variables & constants
@@ -43,6 +47,7 @@ An asynchronous REST API built with FastAPI and Python 3.11 for automated unifie
 │       └── sse_manager.py    # Structured SSE log & broadcaster
 ├── tests/                    # Integration & manual edge-case tests
 ├── Dockerfile
+├── pyproject.toml            # Linter & tool configuration
 ├── render.yaml
 └── requirements.txt
 ```
@@ -87,6 +92,18 @@ The service will be available at `http://localhost:8000`.
 
 ---
 
+## Continuous Integration (CI)
+
+This repository includes an automated CI workflow configured with GitHub Actions ([.github/workflows/ci.yml](file:///.github/workflows/ci.yml)).
+
+On every `push` or `pull_request` to the `main` branch, the pipeline automatically:
+1. Sets up Python 3.11 environment with `pip` package caching.
+2. Installs dependencies from `requirements.txt`.
+3. Runs code linting via `ruff` (`python -m ruff check .`).
+4. Runs automated tests via `pytest` with execution timeouts (`python -m pytest -v --timeout=30`).
+
+---
+
 ## Docker & Deployment
 
 ### Run via Docker
@@ -118,6 +135,7 @@ Deploy directly using `render.yaml` or set up a Docker Web Service pointing to `
 
 | Method | Endpoint | Auth Required | Description |
 |---|---|---|---|
+| `GET` | `/` | No | Root greeting endpoint (`hi :)`) |
 | `GET` | `/health` | No | System health and service uptime |
 | `GET` | `/spec` | No | Declarative limits, providers, and version |
 | `POST` | `/v1/reviews` | Yes | Submit a unified diff for analysis |
@@ -163,5 +181,5 @@ curl -H "Authorization: Bearer xsolla-secret-bearer-token-rautaditya2606" \
 Run the full automated test suite (includes auth, rate limits, caching, chunking, SSE replay, and edge-case verifications):
 
 ```bash
-pytest -v
+python -m pytest -v
 ```
