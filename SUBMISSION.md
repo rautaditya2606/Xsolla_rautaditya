@@ -1,91 +1,90 @@
 # Candidate Submission: AI Diff Review Service
 
 ## Service Configuration
-- **Base URL**: `http://localhost:8000` (Local testing) / Render / Tunnel URL
-- **Bearer Token**: `xsolla-secret-bearer-token-2026`
-- **Repository URL**: `https://github.com/adityaraut/Xsolla_OA`
+- **Base URL**: `https://ai-diff-review-rautaditya2606.onrender.com`
+- **Bearer Token**: `xsolla-secret-bearer-token-rautaditya2606`
+- **Repository URL**: `https://github.com/rautaditya2606/Xsolla_rautaditya`
 
 ---
 
-## 1. Architecture & Key Refactoring Improvements
-The AI Diff Review Service is implemented in Python 3.11+ using FastAPI, Uvicorn, Asyncio, and `unidiff`. The core design focuses on robustness, contract precision, and zero external database overhead:
+## 1. Architecture & Design Decisions
+The AI Diff Review Service is implemented in Python 3.11+ using FastAPI. The architecture focuses on contract compliance, deterministic execution, and low-latency response processing:
 
-```
+```text
 [ HTTP Client ] ---> [ FastAPI / Bearer Auth / Custom Sliding Window Rate Limiter ]
                                          |
                                POST /v1/reviews (Thin Route)
                                          |
                        [ QueueManager & Result Cache Store ]
                                          |
-                         (asyncio.Queue() -> 4 Workers)
+                        (Bounded Background Worker Pool)
                                          |
-                               [ JobProcessor Pipeline ]
+                              [ JobProcessor Pipeline ]
                    ┌─────────────────────┴─────────────────────┐
-           [ unidiff Parser ]                          [ Provider Factory ]
+           [ Unidiff Parser ]                          [ Provider Factory ]
      (line-number & hunk tracking)                     ├─ MockProvider (9 rules)
-    [ Sequential Chunker (≤64KiB) ]                    └─ LLMProvider (graceful fallback)
+    [ Sequential Chunker (<=64KiB) ]                   └─ LLMProvider (graceful fallback)
                                          |
                                [ SSE Manager Broadcast ]
                                  └─ Structured event replay
 ```
 
-Key Refactoring Improvements:
-1. **Custom Sliding Window Rate Limiter**: Replaced external libraries with a custom sliding window rate limiter (30 req/min). Dynamically computes exact `Retry-After` headers and exact `$429$` error envelopes.
-2. **Standardized Diff Parsing (`unidiff`)**: Uses `unidiff.PatchSet` to parse files, hunks, and line numbers accurately across edge cases.
-3. **Result-Based Cache Store**: Caching maps `sha256(diff+options)` directly to `CachedResult`. Cache hits immediately return completed jobs with `cacheHit: True` regardless of job retention.
-4. **Explicit Worker Queue (`asyncio.Queue` + 4 Workers)**: Replaced semaphores with a true `asyncio.Queue()` and 4 background worker tasks initialized on server startup.
-5. **Structured SSE Events**: Replaced raw string formatting in log storage with `SSEEvent(type: str, data: Any)` objects, serializing dynamically during streaming.
-6. **Clean Provider Factory Abstraction**: Abstract `BaseProvider` interface implemented by `MockProvider` and `LLMProvider`, selected via `ProviderFactory`.
-7. **Thin Routes & Dedicated `JobProcessor`**: Routes delegate pipeline execution to `services/job_processor.py`. Raw payload size is checked prior to JSON or Pydantic parsing.
-8. **Removed Unnecessary Middleware**: Stripped `CORSMiddleware` since client calls originate strictly from HTTP API probes.
+### Key Architectural Decisions:
+1. **Custom Sliding Window Rate Limiter**: Implemented custom sliding window rate limiting (30 requests/minute) to guarantee precise calculation of `Retry-After` header delays and standard 429 error messages.
+2. **Robust Diff Parsing**: Integrated standard unified diff parsing (`unidiff`) to track file hunks, line numbers, and added lines reliably across edge cases.
+3. **Result-Based Cache Store**: Decoupled caching from job object lifetimes by indexing execution results directly by payload hash (`sha256(diff + options)`). Cache hits instantly yield completed results with `cacheHit: True`.
+4. **Bounded Worker Queue**: Employed a fixed concurrency worker pool (4 concurrent workers) to decouple job acceptance (HTTP 202) from job execution without thread or process bloat.
+5. **Structured SSE Event Log**: Event progress and results are stored as structured objects rather than formatted strings, allowing clean replay on client reconnects and clean separation from transport protocols.
+6. **Provider Abstraction**: Enforced a clean provider interface (`BaseProvider`) allowing seamless switching between static rule scanning and LLM processing.
+7. **Thin Routes & Raw Body Parsing**: Enforced payload size checks (1 MiB limit) on raw request bytes prior to schema parsing to prevent memory exhaustion on oversized payloads.
 
 ---
 
 ## 2. Provider Design
-The system uses an abstract provider interface (`BaseProvider`):
 
 - **`MockProvider`**:
-  - Fully deterministic rule engine executing all 9 scoring rules (MOCK-001 through MOCK-008 and MOCK-INJ).
-  - Processes added lines extracted via `unidiff`.
-  - MOCK-004 (swallowed exception) uses a stateful brace-depth scanner (`{ ... }`) anchored to the `{` following the `catch` keyword.
-  - Results are deduplicated by `id` (`{ruleId}:{path}:{line}`) and sorted deterministically by `path` (lexicographical) $\to$ `line` (ascending) $\to$ `ruleId`.
-  - `MOCK-INJ` prompt injection markers are reported as inert findings without altering execution logic.
+  - Deterministic rule evaluation engine executing 9 scoring rules (`MOCK-001` through `MOCK-008` & `MOCK-INJ`).
+  - `MOCK-004` (swallowed exception detection) uses a stateful brace-depth analyzer (`{ ... }`) anchored to the `{` character following the `catch` statement.
+  - Findings are deduplicated by finding key (`ruleId:path:line`) and sorted deterministically by `path` (lexicographical) -> `line` (ascending) -> `ruleId`.
+  - `MOCK-INJ` prompt injection markers are treated as inert text findings without interrupting job flow or altering review behavior.
 
 - **`LLMProvider`**:
-  - Connects to an external OpenAI-compatible LLM endpoint using `httpx.AsyncClient`.
-  - Credentials and model settings live entirely server-side (`LLM_API_KEY`, `LLM_MODEL`).
-  - If `LLM_API_KEY` is missing or the external API fails, the job transitions gracefully to `"failed"` state with a clean error message, ensuring the server never crashes.
+  - Connects to an external OpenAI-compatible LLM endpoint using asynchronous HTTP requests.
+  - Configuration settings (`LLM_API_KEY`, `LLM_MODEL`) are maintained server-side.
+  - Gracefully handles missing API keys or external service failures by setting job status to `failed` with a descriptive error messages instead of crashing with HTTP 500.
 
 ---
 
 ## 3. Verification of Cross-Cutting Behaviors
 
-1. **Chunking (≤64 KiB)**:
-   - Diffs larger than 64 KiB are grouped into chunks strictly on file boundaries using `chunker.py`.
-   - Verified that findings match unchunked scans identically (zero duplicates, zero losses, ordering preserved), and `usage.chunks` accurately reflects chunk count.
+Verified using automated pytest tests and manual end-to-end testing against the deployed service.
+
+1. **Chunking (<= 64 KiB)**:
+   - Diffs exceeding 64 KiB are split strictly on file boundaries into sequential chunks.
+   - Verified that chunked and unchunked execution produce identical findings and ordering, and `usage.chunks` accurately reflects chunk count.
 
 2. **Caching & Idempotency**:
-   - **Idempotency**: Checked before cache lookup using SHA-256 body hashes tied to `Idempotency-Key` headers. Reusing a key with an identical body returns the existing `jobId` ($202$); reusing a key with a modified body yields $409$ `idempotency_conflict`.
-   - **Caching**: Payload hashes (`sha256(diff + options)`) index completed results. Repeated submissions return `"cacheHit": true` with zero redundant scanning.
+   - **Idempotency**: Requests containing an `Idempotency-Key` header check stored key mappings before processing. Submitting identical payloads returns the existing `jobId` (202); submitting modified payloads yields a 409 `idempotency_conflict` error.
+   - **Caching**: Submitting identical diff and option payloads returns completed cached results (`cacheHit: true`) with zero redundant processing.
 
 3. **SSE Replay & Streaming**:
-   - Every status transition, finding, and completion metric is saved as a structured `SSEEvent` to `job.event_log`.
-   - Verified that connecting to `GET /v1/reviews/{jobId}/stream` replays historical events from memory before subscribing to live updates.
+   - Historical job events (`status`, `finding`, `done`) are preserved in job log storage.
+   - Connecting or reconnecting to `GET /v1/reviews/{jobId}/stream` replays past events sequentially before streaming live updates.
 
 ---
 
 ## 4. AI Tools Used
-- **Antigravity (Google DeepMind)**: Used for architecture refactoring, `unidiff` integration, worker queue design, test suite updates, and edge-case verification.
+- **Antigravity (Google DeepMind)**: Used for architecture refactoring, diff parser integration, worker queue design, test suite execution, and edge-case verification.
 
 ---
 
 ## 5. Rejected AI Suggestion & Rationale
-- **Rejected Suggestion**: An AI assistant originally suggested storing formatted SSE event strings directly in memory for replay.
-- **Why Rejected**: Storing pre-formatted SSE string literals tightly coupled internal event representation with transport formatting. Storing structured `SSEEvent(type, data)` objects separates event data from serialization, allowing flexible serialization formats (e.g. `orjson`) and simpler inspection during testing.
+- **Rejected Suggestion**: Storing pre-formatted SSE string literals directly in memory for event replay.
+- **Why Rejected**: Storing formatted string literals tightly coupled internal event models with the transport protocol. Storing structured event objects decouples data representation from serialization and simplifies test assertions.
 
 ---
 
-## 6. What I Would Do Next with More Time
-1. **Persistent State Store**: Replace in-memory dictionaries with SQLite / Redis (using Redis Pub/Sub for SSE streaming) so state survives server restarts and scales horizontally across multiple instances.
-2. **Prometheus Metrics**: Expose `/metrics` for tracking job throughput, active queue length, cache hit ratios, and worker execution latencies.
-3. **AST-Based Semantic Code Analysis**: Move beyond regex/string matching in the mock provider to tree-sitter AST parsing for more accurate language-aware rule checking.
+## 6. Future Improvements
+1. **Persistent State Store**: Replace in-memory stores with Redis / SQLite to support server restarts and horizontal scaling.
+2. **Prometheus Metrics**: Expose `/metrics` endpoint to monitor queue depth, execution latency, and cache hit rates.
+3. **AST Code Analysis**: Introduce AST parser integrations (e.g. tree-sitter) for deeper semantic code analysis beyond regex/string matching.

@@ -9,11 +9,26 @@ from src.services.queue_manager import queue_manager
 from src.routes.health import router as health_router
 from src.routes.reviews import router as reviews_router
 
+import asyncio
+import httpx
+
+async def self_pinger():
+    await asyncio.sleep(10)
+    url = f"http://127.0.0.1:{config.PORT}/health"
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                await client.get(url)
+            except Exception:
+                pass
+            await asyncio.sleep(240)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start 4 background queue worker tasks on startup
     queue_manager.start_workers(config.MAX_CONCURRENT_JOBS)
+    ping_task = asyncio.create_task(self_pinger())
     yield
+    ping_task.cancel()
 
 app = FastAPI(
     title="AI Diff Review Service",

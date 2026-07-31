@@ -3,8 +3,14 @@ from fastapi import APIRouter
 from src.config import config
 from src.models.schemas import HealthResponse, SpecResponse, LimitsSpec
 
+from fastapi.responses import PlainTextResponse
+
 router = APIRouter()
 SERVER_START_TIME = time.time()
+
+@router.get("/", response_class=PlainTextResponse)
+async def root():
+    return "hi :)"
 
 @router.get("/health", response_model=HealthResponse)
 async def get_health():

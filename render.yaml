@@ -1,12 +1,12 @@
 services:
   - type: web
     name: ai-diff-review-service
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    env: image
+    image:
+      url: docker.io/adityaraut2606/ai-diff-review:latest
     envVars:
       - key: BEARER_TOKEN
-        generateValue: true
+        value: xsolla-secret-bearer-token-2026
       - key: LLM_API_KEY
         sync: false
       - key: LLM_PROVIDER
